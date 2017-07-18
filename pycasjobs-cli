@@ -1,0 +1,545 @@
+#!/bin/env python3
+
+#
+# Copyright (C) 2016-2017  Maurizio D'Addona <mauritiusdadd@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+import os
+import sys
+import argparse
+
+import casjobs
+import urllib
+
+PROGRAM_VERSION = '0.0.1'
+
+if 'linux' in sys.platform.lower():
+    DEFAULT_CONFIG_FILE = os.path.join('/etc',
+                                       casjobs.CasJobsInterface.CONFIG_FILE)
+    USER_CONFIG_FILE = os.path.join(os.path.expanduser('~/.config/pycasjobs'),
+                                    casjobs.CasJobsInterface.CONFIG_FILE)
+else:
+    raise NotImplementedError("Nooooooo, this platform is not supported yet!")
+
+
+# Description for the argument parsers
+
+PARSER_HELP_MAIN ='''pycasjob-cli is a simple python wrapper
+                     for the CasJobs webservice. It allows you
+                     manage your queries without the need to
+                     login in the web interface'''
+
+PARSER_HELP_JOBS = '''Returns a listing of job info, including status.
+                      Default operations returns all jobs within 24 hrs.'''
+
+PARSER_HELP_EXEC = '''Ends a short query and returns results.
+                      Arg is either a file path or a query, depending on
+                      options. Queue option is ignored; this is the same
+                      as submitting a short job from the website.'''
+
+PARSER_HELP_TBLS = '''Lists all tables in MyDB'''
+
+PARSER_HELP_OUTP = '''With this command you can view and download
+                      available output. Default is to display complete,
+                      available output.'''
+
+PARSER_HELP_SUBM = '''Submits a query and returns a jobid. Arg is either
+                      a file path or a query, depending on options.'''
+
+PARSER_HELP_RUN = '''Submits a query and waits for it to complete.
+                     Arg is either a file path or a query, depending
+                     on options.'''
+
+PARSER_HELP_SRVS = '''Specify to return a list of all <server>/<queue>
+                      combinations.'''
+
+PARSER_HELP_EXTR = '''With this command you can submit an extraction job.
+                      The table option is required.  Default output type
+                      is CSV.'''
+
+
+class MyHelpFormatter(argparse.HelpFormatter):
+
+    def format_help(self):
+        help = self._root_section.format_help()
+        if help:
+            help = self._long_break_matcher.sub('\n\n', help)
+            help = '\n' + help.strip('\n') + '\n\n'
+        return help
+
+
+    def _get_help_string(self, action):
+        if not action.help.endswith('.'):
+            action.help += '.'
+        return action.help
+
+
+def error(msg):
+    print("Error: {}".format(str(msg)))
+
+
+def _argisvalid(arg, args):
+    if arg in args and args[arg] is not None:
+        return True
+    else:
+        return False
+
+def _addfrmtagr(key, arg, args):
+    if _argisvalid(arg, args):
+        return "{}={}".format(key, args[arg])
+    else:
+        return ""
+
+def _jobs(cas, args):
+    conditions = ""
+    conditions += _addfrmtagr('DAYS', 'days', args)
+    conditions += _addfrmtagr('STATUS', 'status', args)
+    conditions += _addfrmtagr('JOBID', 'jobid', args)
+
+    print(conditions)
+    return cas.getjobs(conditions)
+
+def _exec(cas, args, quickrun=True, wait=True):
+    print(args)
+
+    query = ' '.join(args['query'])
+
+    if _argisvalid('file', args) and args['file']:
+        # In this case 'query' should be the url of a file
+        # containing the actual query
+        if not os.path.isfile(query):
+            error("'{}' is not a file or it does not exist!".format(query))
+            sys.exit(1)
+        try:
+            with open(query, 'r') as inpf:
+                # replaces the url with the file content
+                query = inpf.read()
+        except IOError:
+            error("Cannot open the file '{}'".format(query))
+
+    # TODO: 'queue' is currently unused!
+    if quickrun:
+        resutl = cas.quickrun(query, args['target'], args['taskname'])
+    elif wait:
+        jid = int(cas.submitjob(query, args['target'], args['taskname']))
+        while not cas.getjobstatus(jid):
+            time.sleep(10)
+        return "Done!"
+    else:
+        result = cas.submitjob(query, args['target'], args['taskname'])
+
+def _tbls(cas, args):
+    print(cas, args)
+
+
+def _outp(cas, args):
+    print(args)
+
+
+def _subm(cas, args):
+    return _exec(cas, args, quickrun=False, wait=False)
+
+
+def _run(cas, args):
+    return _exec(cas, args, quickrun=False, wait=True)
+
+
+def _srvs(cas, args):
+    print(args)
+
+
+def _extr(cas, args):
+    print(args)
+
+
+if __name__ == "__main__":
+
+    casiface = casjobs.CasJobsInterface()
+
+    #  Let's load the global configuration if existing
+    if os.path.isfile(DEFAULT_CONFIG_FILE):
+        casiface.loadconfig(DEFAULT_CONFIG_FILE)
+
+    #  Let's override the global configuratio using
+    #   user's one, if existing
+    if os.path.isfile(USER_CONFIG_FILE):
+        casiface.loadconfig(USER_CONFIG_FILE)
+
+    #  Now let's parse the arguments passed to the program
+    parser = argparse.ArgumentParser(
+        description=PARSER_HELP_MAIN,
+        formatter_class=MyHelpFormatter
+    )
+
+    subparsers = parser.add_subparsers()
+
+    pars_jobs = subparsers.add_parser(
+        name="jobs",
+        description=PARSER_HELP_JOBS,
+        help=PARSER_HELP_JOBS
+    )
+    pars_jobs.set_defaults(func=_jobs)
+
+    pars_exec = subparsers.add_parser(
+        name="execute",
+        description=PARSER_HELP_EXEC,
+        help=PARSER_HELP_EXEC
+    )
+    pars_exec.set_defaults(func=_exec)
+
+    pars_tbls = subparsers.add_parser(
+        name="tables",
+        description=PARSER_HELP_TBLS,
+        help=PARSER_HELP_TBLS
+    )
+    pars_tbls.set_defaults(func=_tbls)
+
+    pars_outp = subparsers.add_parser(
+        name="output",
+        description=PARSER_HELP_OUTP,
+        help=PARSER_HELP_OUTP
+    )
+    pars_outp.set_defaults(func=_outp)
+
+    pars_subm = subparsers.add_parser(
+        name="submit",
+        description=PARSER_HELP_SUBM,
+        help=PARSER_HELP_SUBM
+    )
+    pars_subm.set_defaults(func=_subm)
+
+    pars_run = subparsers.add_parser(
+        name="run",
+        description=PARSER_HELP_RUN,
+        help=PARSER_HELP_RUN
+    )
+    pars_run.set_defaults(func=_run)
+
+    pars_srvs = subparsers.add_parser(
+        name="servers",
+        description=PARSER_HELP_SRVS,
+        help=PARSER_HELP_SRVS
+    )
+    pars_srvs.set_defaults(func=_srvs)
+
+    pars_extr = subparsers.add_parser(
+        name="extract",
+        description=PARSER_HELP_EXTR,
+        help=PARSER_HELP_EXTR
+    )
+    pars_extr.set_defaults(func=_srvs)
+
+    # Arguments for 'jobs' subparser
+
+    pars_jobs.add_argument(
+        "-t",
+        "--status",
+        type=int,
+        choices=casiface.JOB_STATUS.keys(),
+        metavar=('STATUS'),
+        help='''Returns a listing of job info, including status.
+                Default operations returns all jobs within 24 hrs.
+
+                %(metavar)s can be %(choices)s
+
+                where ''' +
+                str(casiface.JOB_STATUS)[1:-1].replace(':', ' =')
+    )
+
+    pars_jobs.add_argument(
+        "-j",
+        "--jobid",
+        type=int,
+        metavar=('JOBID'),
+        help='''Sets the jobid to %(metavar)s'''
+    )
+
+
+    pars_jobs.add_argument(
+        "-y",
+        "--days",
+        type=int,
+        default=1,
+        metavar=('DAYS'),
+        help='''Specifies how many days back to fetch jobs.
+                For example, specifying 1 would mean jobs within 24 hours,
+                while 7 would mean within the week.  The default value for
+                this option is 1'''
+    )
+
+    # Arguments for 'execute' subparser
+
+    pars_exec.add_argument(
+        "-q",
+        "--queue",
+        type=int,
+        metavar=('QUEUE'),
+        help='''Sets the queue for a job to %(metavar)s'''
+    )
+
+    pars_exec.add_argument(
+        "-n",
+        "--taskname",
+        type=str,
+        metavar=('NAME'),
+        help='''Sets the task name for a job to %(metavar)s'''
+    )
+
+    pars_exec.add_argument(
+        "-f",
+        "--file",
+        action='store_true',
+        help='''Reads the query string from the file %(metavar)s.
+                If this parameter is provided, then the input string
+                is considered as an url pointing to a file containing
+                the query.'''
+    )
+
+    pars_exec.add_argument(
+        "-t",
+        "--target",
+        type=str,
+        metavar=('TARGET'),
+        help='''Sets the target for the job to %(metavar)s'''
+    )
+
+    pars_exec.add_argument(
+        'query',
+        type=str,
+        metavar='QUERY',
+        nargs='+',
+        help='''%(metavar)s is the query string (or the url to a
+                file containing the query if the corresponding
+                parameter is provided)'''
+    )
+
+    # No arguments required for 'table' subparser
+
+    # Arguments for 'output' subparser
+
+    pars_outp.add_argument(
+        "-d",
+        "--download",
+        type=str,
+        metavar=('FILE'),
+        help='''Saves the output to the file %(metavar)s. To download
+                specific table output use the 'table' option in
+                addition to this one.'''
+    )
+
+    pars_outp.add_argument(
+        "-t",
+        "--status",
+        type=int,
+        choices=casiface.JOB_STATUS.keys(),
+        metavar=('STATUS'),
+        help='''Specifies the status of the job to retrieve.
+                %(metavar)s can be %(choices)s
+
+                where ''' +
+                str(casiface.JOB_STATUS)[1:-1].replace(':', ' =')
+    )
+
+    pars_outp.add_argument(
+        "-b",
+        "--table",
+        type=str,
+        metavar=('NAME'),
+        help='''Specifies the name of a specific table for the
+                output command.'''
+    )
+
+    pars_outp.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        default=False,
+        help='''Overwrite existing files without asking.'''
+    )
+
+    # Arguments for 'submit' subparser
+
+
+    pars_subm.add_argument(
+        "-q",
+        "--queue",
+        type=int,
+        metavar=('QUEUE'),
+        help='''Sets the queue for a job to %(metavar)s'''
+    )
+
+    pars_subm.add_argument(
+        "-n",
+        "--taskname",
+        type=str,
+        metavar=('NAME'),
+        help='''Sets the task name for a job to %(metavar)s'''
+    )
+
+    pars_subm.add_argument(
+        "-f",
+        "--file",
+        action='store_true',
+        help='''Reads the query string from the file %(metavar)s.
+                If this parameter is provided, then the input string
+                is considered as an url pointing to a file containing
+                the query.'''
+    )
+
+    pars_subm.add_argument(
+        "-t",
+        "--target",
+        type=str,
+        metavar=('TARGET'),
+        help='''Sets the target for the job to %(metavar)s'''
+    )
+
+    pars_subm.add_argument(
+        'query',
+        type=str,
+        metavar='QUERY',
+        nargs='+',
+        help='''%(metavar)s is the query string (or the url to a
+                file containing the query if the corresponding
+                parameter is provided)'''
+    )
+    # Arguments for 'run' subparser
+
+    pars_run.add_argument(
+        "-q",
+        "--queue",
+        type=int,
+        metavar=('QUEUE'),
+        help='''Sets the queue for a job to %(metavar)s'''
+    )
+
+    pars_run.add_argument(
+        "-n",
+        "--taskname",
+        type=str,
+        metavar=('NAME'),
+        help='''Sets the task name for a job to %(metavar)s'''
+    )
+
+    pars_run.add_argument(
+        "-f",
+        "--file",
+        action='store_true',
+        help='''Reads the query string from the file %(metavar)s.
+                If this parameter is provided, then the input string
+                is considered as an url pointing to a file containing
+                the query.'''
+    )
+
+    pars_run.add_argument(
+        "-t",
+        "--target",
+        type=str,
+        metavar=('TARGET'),
+        help='''Sets the target for the job to %(metavar)s'''
+    )
+
+    pars_run.add_argument(
+        'query',
+        type=str,
+        metavar='QUERY',
+        nargs='+',
+        help='''%(metavar)s is the query string (or the url to a
+                file containing the query if the corresponding
+                parameter is provided)'''
+    )
+    # No arguments required for 'table' subparser
+
+    # Arguments for 'extract' subparser
+
+    pars_extr.add_argument(
+        "-d",
+        "--download",
+        type=str,
+        metavar=('FILE'),
+        help='''Saves the output to the file %(metavar)s. To download
+                specific table output use the 'table' option in
+                addition to this one.'''
+    )
+
+    pars_extr.add_argument(
+        "-u",
+        "--url",
+        action="store_true",
+        help='''Shows the output of job (but not downloaded).
+                The program will wait for the job to complete and will
+                subsequently return the url at which its output can be
+                seen.'''
+    )
+
+    pars_extr.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        default=False,
+        help='''Overwrite existing files without asking.'''
+    )
+
+    pars_extr.add_argument(
+        "-a",
+        "--type",
+        type=str,
+        metavar='TYPE',
+        choices=casiface.FMT_TYPES,
+        help='''Specifies the format od the output.
+                %(metavar)s can be %(choices)s'''
+    )
+
+
+    pars_extr.add_argument(
+        "-b",
+        "--table",
+        type=str,
+        metavar=('NAME'),
+        help='''Specifies the name of a specific table for the command.'''
+    )
+
+    # Global arguments
+
+    parser.add_argument(
+        "-v",
+        "--version",
+        action='store_true',
+        help='''Print the version of the program and exit.'''
+    )
+
+    args = vars(parser.parse_args(sys.argv[1:]))
+
+    if args['version']:
+        print('pycasjobs-cli: version {}'.format(PROGRAM_VERSION))
+        sys.exit(0)
+
+    # executing the proper function corresponding to the command that
+    # has been invoked by the user
+    try:
+        func = args.pop('func')
+    except:
+        print("\nNo commands specified!\n")
+        parser.print_help()
+    else:
+        try:
+            result = func(casiface, args)
+        except urllib.error.URLError:
+            print("\nERROR: Cannot comunicate with CasJob server...\n"
+                  "Check your internet connection and make sure that "
+                  "the url for the service in your configuration is "
+                  "correct.\n")
+            sys.exit(1)
