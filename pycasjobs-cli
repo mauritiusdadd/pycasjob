@@ -99,17 +99,18 @@ def _argisvalid(arg, args):
 
 def _addfrmtagr(key, arg, args):
     if _argisvalid(arg, args):
-        return "{}={}".format(key, args[arg])
+        return "{}:{};".format(key, args[arg])
     else:
         return ""
 
 def _jobs(cas, args):
     conditions = ""
-    conditions += _addfrmtagr('DAYS', 'days', args)
-    conditions += _addfrmtagr('STATUS', 'status', args)
-    conditions += _addfrmtagr('JOBID', 'jobid', args)
+    if _argisvalid('conditions', args):
+        conditions += args['conditions']
+    else:
+        conditions += _addfrmtagr('STATUS', 'status', args)
+        conditions += _addfrmtagr('JOBID', 'jobid', args)
 
-    print(conditions)
     return cas.getjobs(conditions)
 
 def _exec(cas, args, quickrun=True, wait=True):
@@ -267,17 +268,28 @@ if __name__ == "__main__":
         help='''Sets the jobid to %(metavar)s'''
     )
 
-
     pars_jobs.add_argument(
-        "-y",
-        "--days",
-        type=int,
-        default=1,
-        metavar=('DAYS'),
-        help='''Specifies how many days back to fetch jobs.
-                For example, specifying 1 would mean jobs within 24 hours,
-                while 7 would mean within the week.  The default value for
-                this option is 1'''
+        "-c",
+        "--conditions",
+        type=str,
+        metavar=('CONDITIONS'),
+        help='''The 'conditions' parameter is a specifically formatted
+                string describing which jobs should be retrieved. If this
+                argument is specified then other arguments will be ignored.
+                At the top level, this parameter is a list of keys,
+                separated by ';'.
+
+                Each key set is described by a string key followed by ':'
+                followed by a '|' separated list of conditions.
+
+                Each condition may have one of the following possible formats:
+
+                VALUE (equality)
+                VALUE, (equal or greater to VALUE)
+                ,VALUE (less than or equal to VALUE)
+                V1,V2 (between V1 and V2 (inclusive))
+
+                '''
     )
 
     # Arguments for 'execute' subparser
@@ -537,9 +549,10 @@ if __name__ == "__main__":
     else:
         try:
             result = func(casiface, args)
-        except urllib.error.URLError:
+        except urllib.error.URLError as exc:
             print("\nERROR: Cannot comunicate with CasJob server...\n"
                   "Check your internet connection and make sure that "
                   "the url for the service in your configuration is "
                   "correct.\n")
+            print(str(exc)+'\n')
             sys.exit(1)

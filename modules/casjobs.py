@@ -58,12 +58,12 @@ class CjQueue(object):
 
 class CasJobsInterface(object):
 
-    DEFAULT_SERVICE_ENDPOINT = "http://skyserver.sdss3.org/casjobs/services/jobs.asmx"
+    DEFAULT_SERVICE_ENDPOINT = "http://skyserver.sdss.org/casjobs/services/jobs.asmx"
 
     CONFIG_FILE = "CasJobs.config"
 
     DATA_TARGETS = [
-        'DR9', 'DR10', 'DR11', 'DR12', 'DR13'
+        'DR9', 'DR10', 'DR11', 'DR12', 'DR13', 'DR14'
     ]
 
     JOB_STATUS = {
@@ -128,6 +128,8 @@ class CasJobsInterface(object):
 
         post_args = urllib.parse.urlencode(args)
         post_cmd = post_fmt_str.format(self.endpoint, func, post_args)
+
+        # print(post_cmd)
 
         with urllib.request.urlopen(post_cmd) as resp:
             return resp.read().decode('UTF-8')
